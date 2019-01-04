@@ -15,6 +15,8 @@
 import string
 from collections import namedtuple
 
+import idna
+
 from synapse.api.errors import SynapseError
 
 
@@ -137,24 +139,37 @@ class DomainSpecificString(
     @classmethod
     def from_string(cls, s):
         """Parse the string given by 's' into a structure object."""
-        if len(s) < 1 or s[0:1] != cls.SIGIL:
-            raise SynapseError(400, "Expected %s string to start with '%s'" % (
-                cls.__name__, cls.SIGIL,
-            ))
 
-        parts = s[1:].split(':', 1)
-        if len(parts) != 2:
+        if not s.startswith(cls.SIGIL):
+            raise SynapseError(
+                400, "Expected %s string to start with %r" % (
+                    cls.__name__, cls.SIGIL,
+                )
+            )
+
+        try:
+            localpart, domain = s[1:].split(':', 1)
+        except ValueError:
             raise SynapseError(
                 400, "Expected %s of the form '%slocalname:domain'" % (
                     cls.__name__, cls.SIGIL,
                 )
             )
 
-        domain = parts[1]
+        domain = domain.strip()
+        try:
+            if domain[2:4] == '--':
+                domain = idna.decode(domain)
+            else:
+                idna.encode(domain)
+        except idna.IDNAError:
+            raise SynapseError(
+                400, "%s got invalid domain name" % (cls.__name__, )
+            )
 
         # This code will need changing if we want to support multiple domain
         # names on one HS
-        return cls(localpart=parts[0], domain=domain)
+        return cls(localpart=localpart, domain=domain)
 
     def to_string(self):
         """Return a string encoding the fields of the structure object."""
